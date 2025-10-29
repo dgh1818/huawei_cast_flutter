@@ -1,0 +1,30 @@
+name: huawei_cast
+description: huawei_cast
+version: 1.0.0
+homepage: https://github.com/hui-z/image_gallery_saver
+publish_to: none
+
+environment:
+  sdk: '>=2.12.0 <4.0.0'
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+
+# For information on the generic Dart part of this file, see the
+# following page: https://www.dartlang.org/tools/pub/pubspec
+
+# The following section is specific to Flutter.
+flutter:
+  plugin:
+    platforms:
+      ohos:
+        package: com.dgh18.huaweicast
+        pluginClass: HuaweiCast
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+

@@ -1,0 +1,11 @@
+[
+    {
+        "Name": "image_gallery_saver",
+        "License": "MIT License",
+        "License File": "LICENSE",
+        "Version Number": "8c6480bf3a07834df89525e7ac6e0196ec701f73",
+        "Owner": "george.lihui@huawei.com",
+        "Upstream URL": "https://github.com/hui-z/image_gallery_saver",
+        "Description": "A flutter plugin for save image to gallery, iOS need to add the following keys to your Info.plist file."
+    }
+]
