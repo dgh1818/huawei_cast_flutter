@@ -22,7 +22,7 @@ flutter:
     platforms:
       ohos:
         package: com.dgh18.huaweicast
-        pluginClass: HuaweiCast
+        pluginClass: HuaweiCastPlugin
 
 dev_dependencies:
   flutter_test:
