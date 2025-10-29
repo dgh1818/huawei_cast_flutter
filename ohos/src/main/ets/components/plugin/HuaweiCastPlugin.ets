@@ -40,7 +40,7 @@ import { common } from '@kit.AbilityKit';
 
 const TAG = "HuaweiCastPlugin"
 
-/** ImageGallerySaverPlugin **/
+/** ImageGallerySaverPlugin2 **/
 export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandler, AbilityAware {
   public avCastController?: avSession.AVCastController;
   public avSession?: avSession.AVSession;
@@ -64,7 +64,7 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   }
 
   getUniqueClassName(): string {
-    return "ImageGallerySaverPlugin"
+    return "HuaweiCastPlugin"
   }
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
