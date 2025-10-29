@@ -22,5 +22,5 @@
  * SOFTWARE.
  */
 
-import ImageGallerySaverPlugin from './src/main/ets/components/plugin/HuaweiCastPlugin';
+import HuaweiCastPlugin from './src/main/ets/components/plugin/HuaweiCastPlugin';
 export default HuaweiCastPlugin;
