@@ -23,14 +23,11 @@
  * SOFTWARE.
  */
 
-import {
-  FlutterPlugin,
-  FlutterPluginBinding
-} from '@ohos/flutter_ohos/src/main/ets/embedding/engine/plugins/FlutterPlugin';
-import MethodChannel, {
+import { FlutterPlugin, FlutterPluginBinding, MethodCall,
   MethodCallHandler,
-  MethodResult
-} from '@ohos/flutter_ohos/src/main/ets/plugin/common/MethodChannel';
+  MethodChannel, MethodResult,
+  StandardMethodCodec,AbilityAware,AbilityPluginBinding,FlutterLoader,
+  PluginRegistry } from "@ohos/flutter_ohos";
 import MethodCall from '@ohos/flutter_ohos/src/main/ets/plugin/common/MethodCall';
 import { AbilityAware, AbilityPluginBinding } from '@ohos/flutter_ohos';
 import { avSession } from '@kit.AVSessionKit';
