@@ -28,8 +28,7 @@ import { FlutterPlugin, FlutterPluginBinding, MethodCall,
   MethodChannel, MethodResult,
   StandardMethodCodec,AbilityAware,AbilityPluginBinding,FlutterLoader,
   PluginRegistry } from "@ohos/flutter_ohos";
-import MethodCall from '@ohos/flutter_ohos/src/main/ets/plugin/common/MethodCall';
-import { AbilityAware, AbilityPluginBinding } from '@ohos/flutter_ohos';
+
 import { avSession } from '@kit.AVSessionKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
@@ -47,6 +46,17 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   private applicationContext: common.UIAbilityContext | null = null;
   //private fileMimeType: FileMimeTypeUtil = new FileMimeTypeUtil();
   private binding: AbilityPluginBinding | null = null;
+  private metadata?: avSession.AVMetadata;
+
+  private contentUrl?: string;
+  private mediaImage?: string;
+  private title?: string;
+  private duration?:number;
+
+  private assetId?: string;
+
+  private position: number = 0;
+  private isPlaying: boolean = true
 
   constructor() {
   }
@@ -65,7 +75,7 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   }
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
-    this.channel = new MethodChannel(binding.getBinaryMessenger(), "caster");
+    this.channel = new MethodChannel(binding.getBinaryMessenger(), "huawei_cast");
     this.channel.setMethodCallHandler(this);
     //this.applicationContext = binding.getApplicationContext();
   }
@@ -78,12 +88,28 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
 
   async onMethodCall(call: MethodCall, result: MethodResult) {
     switch (call.method) {
-      case "LoadVideo":
-        let contentId: string = call.args.get("contentId");
-        let streamType: string = call.args.get("streamType");
-        let contentType: string = call.args.get("contentType");
-        let contentUrl: string = call.args.get("contentUrl");
-        return result.success(await this.loadMedia(contentId, streamType, contentType,contentUrl,result));
+      case "setMetadata":
+        this.contentUrl = call.args.get("contentUrl");
+        this.mediaImage = call.args.get("mediaImage");
+        this.title = call.args.get("title");
+        this.duration = call.args.get("duration");
+        await this.createSession(this.contentUrl!, this.mediaImage!, this.title!, this.duration!,result);
+        break;
+      case "startCast":
+        this.assetId = call.args.get("assetId");
+        //await this.setOutputDeviceChangeListener(this.assetId!, this.title!, this.contentUrl!);
+        await this.startCast(this.assetId!, this.title!, this.contentUrl!);
+        result.success({});
+        break;
+      case "setCurrentPosition":
+        this.position = call.args.get("position");
+        this.isPlaying = call.args.get("isPlaying") as boolean;
+        this.setCurrentPosition(this.position,this.isPlaying);
+        result.success({});
+        break;
+      case "clearSession":
+        await this.clearSession();
+        result.success({});
       default:
         return result.notImplemented();
     }
@@ -93,87 +119,171 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   /**
    * 设置输出设备变化监听器
    */
-  private setOutputDeviceChangeListener(): void {
-    this.avSession?.on('outputDeviceChange', (connectState: avSession.ConnectionState,
+private async setOutputDeviceChangeListener(assetId: string, title: string, mediaUri: string): Promise<void> {
+    this.avSession?.on('outputDeviceChange', async (connectState: avSession.ConnectionState,
       device: avSession.OutputDeviceInfo) => {
       const castCategory = device?.devices?.[0].castCategory;
       // 成功连接远程设备
       if (castCategory === avSession.AVCastCategory.CATEGORY_REMOTE &&
         connectState === avSession.ConnectionState.STATE_CONNECTED) {
+        this.avCastController = await this.avSession!.getAVCastController();
         // 获取cast控制器
-        this.avSession?.getAVCastController().then(async (controller: avSession.AVCastController) => {
-          //Log.info(0x0666, TAG, 'success to get avController');
-          this.avCastController = controller;
-          if(this.playItem) {
-            this.startCast(this.playItem);
-          }
-        })
-      }
 
-      // 远端断开 或 本地连上 都算断开投播
-      const isDisConnect = (castCategory === avSession.AVCastCategory.CATEGORY_REMOTE &&
-        connectState === avSession.ConnectionState.STATE_DISCONNECTED)
-        || (castCategory === avSession.AVCastCategory.CATEGORY_LOCAL &&
-          connectState === avSession.ConnectionState.STATE_CONNECTED);
-      if (isDisConnect) {
-        //this.stopCast(this.playItem);
-      }
-    });
-  }
+        this.avCastController?.prepare(this.playItem);
+        this.avCastController!.start(this.playItem);
+
+        }
+      })
+    };
+
 
   /**
    * 开始投播
    */
-  private async startCast(mediaInfo:avSession.AVQueueItem): Promise<void> {
 
-    // 通知业务开始投播
-    //const deviceName: string = '客厅的智慧屏';
-    //this.callbackOnStart?.(deviceName);
 
-    // 构建播放影片队列数据，开始prepare
-    try {
-      await this.avCastController?.prepare(mediaInfo);
-      this.avCastController!.start(this.playItem);
-    } catch (err) {
-      //this.handlerCastError(err, 'avSessionError', 'prepare');
+
+  async createSession(url: string, mediaImage: string, title: string, duration: number,
+    result: MethodResult): Promise<void> {
+
+    // this.avSession = await avSession.createAVSession(this.applicationContext, 'video_test', 'video');
+    if (!this.applicationContext) {
+      return;
+    }
+
+    if(!this.avSession) {
+      this.avSession = await avSession.createAVSession(this.applicationContext, 'cast', 'video');
+    }
+
+    this.avSession.activate();
+
+    this.metadata = {
+      assetId: url,
+      mediaImage: mediaImage,
+      title: title, // 需要配置实际id
+      duration: duration, // 播放媒体资源的标题
+      // 发现Cast+ Stream 和 DLNA协议设备，TYPE_CAST_PLUS_STREAM为默认必选。
+      filter: avSession.ProtocolType.TYPE_CAST_PLUS_STREAM | avSession.ProtocolType.TYPE_DLNA,
+    };
+
+    await this.avSession.setAVMetadata(this.metadata);
+    await this.avSession.setExtras({ 'requireAbilityList': ['url-cast'] })
+    await this.setListenerForMesFromController();
+    result.success({});
+  }
+
+  async clearSession(): Promise<void> {
+
+    // this.avSession = await avSession.createAVSession(this.applicationContext, 'video_test', 'video');
+    if (!this.applicationContext) {
+      return;
+    }
+
+    if(this.avSession) {
+      this.avSession.destroy();
+      this.avSession = undefined;
     }
   }
 
-  async loadMedia(contentId: string, streamType: string, contentType: string, contentUrl: string, result: MethodResult) :Promise<void>{
+
+  private async startCast(assetId: string, title: string, mediaUri: string): Promise<void> {
+
+
+
     if (this.applicationContext) {
       this.playItem = {
         itemId: 1,
         description: {
-          assetId: contentId,
-          title: contentId,
-          mediaUri: contentUrl,
+          assetId: `${assetId}`,
+          title: title,
+          mediaUri: mediaUri,
         }
       };
       let avCastPicker = new avSession.AVCastPickerHelper(this.applicationContext);
+
       let tag = "createNewSession";
 
       let avCastPickerOptions: avSession.AVCastPickerOptions = {
         sessionType: 'video',
       }
-      avCastPicker.select(avCastPickerOptions).then(() => {
+
+      this.setOutputDeviceChangeListener(assetId, title, mediaUri);
+
+
+      avCastPicker.select(avCastPickerOptions).then( () => {
         console.info('select successfully');
+        try {
+          // this.avCastController = this.avSession!.getAVCastController();
+          // this.avCastController?.prepare(this.playItem);
+          // this.avCastController!.start(this.playItem);
+        } catch (err) {
+          console.error(err);
+          //this.handlerCastError(err, 'avSessionError', 'prepare');
+        }
 
-
-
-        avSession.createAVSession(this.applicationContext, 'cast', "video").then(async (data: avSession.AVSession) => {
-          this.avSession = data;
-          this.sessionId = this.avSession.sessionId;
-          console.info(`CreateAVSession : SUCCESS : sessionId = ${this.sessionId}`);
-          this.avCastController = await this.avSession.getAVCastController();
-          this.setOutputDeviceChangeListener();
-
-
-        }).catch((err: BusinessError) => {
-          console.error(`CreateAVSession BusinessError: code: ${err.code}, message: ${err.message}`);
-        });
       }).catch((err: BusinessError) => {
         console.error(`AVCastPicker.select failed with err: ${err.code}, ${err.message}`);
       });
+
     }
   }
+
+  private async setCurrentPosition(position: number, isplaying: boolean): Promise<void> {
+    let playbackState: avSession.AVPlaybackState = {
+      state: isplaying?avSession.PlaybackState.PLAYBACK_STATE_PLAY :avSession.PlaybackState.PLAYBACK_STATE_PAUSE,
+      position: {
+        elapsedTime: position, // 已经播放的位置，以ms为单位。
+        updateTime: new Date().getTime(), // 应用更新当前位置时的时间戳，以ms为单位。
+      },
+    };
+
+    this.avSession!.setAVPlaybackState(playbackState, (err) => {
+      if (err) {
+        console.error(`Failed to set AVPlaybackState. Code: ${err.code}, message: ${err.message}`);
+      } else {
+        //console.info(`SetAVPlaybackState successfully`);
+      }
+    });
+  }
+
+  async setListenerForMesFromController() {
+    if (!this.avSession) {
+      return;
+    }
+    this.avSession.on('play', this.playCall);
+    this.avSession.on('pause', this.pauseCall);
+    this.avSession.off('playNext');
+    this.avSession.off('playPrevious');
+    this.avSession.on('seek', (time: number) => {
+      this.channel?.invokeMethod('seekTo',{'position':time});
+    });
+  }
+
+  async unregisterSessionListener() {
+    if (!this.avSession) {
+      return;
+    }
+    this.avSession.off('play');
+    this.avSession.off('pause');
+    this.avSession.off('playNext');
+    this.avSession.off('playPrevious');
+  }
+
+  private playCall: () =>void = () => {
+    //his.m
+    this.channel?.invokeMethod('play',{});
+
+
+  };
+  private pauseCall: () =>void = () => {
+    this.channel?.invokeMethod('pause',{});
+    //this.pause();
+  };
+  private playNextCall: () =>void = () => {
+
+    return;
+  };
+  private playPreviousCall: () =>void = () => {
+    return
+  };
 }
