@@ -1,82 +1,259 @@
-<p align="center">
-  <h1 align="center"> <code>image_gallery_saver</code> </h1>
-</p>
+# huawei_cast
 
+`huawei_cast` is a Flutter plugin for OpenHarmony / HarmonyOS video casting.
 
+It is built on top of `AVSession` and the system `AVCastPicker`, and is designed for apps that need to:
 
-This project is based on [image_gallery_saver@2.0.3](https://pub.dev/packages/image_gallery_saver/versions/2.0.3).
+- publish media metadata to the system playback panel
+- start casting by URL through the system picker
+- sync play state and progress to the system media bar
+- receive play / pause / seek events back from the system or remote device
+- send playback commands to the connected receiver
 
+## Platform support
 
+- OpenHarmony / HarmonyOS only
+- current implementation focuses on video playback
+- the receiver must be able to access your media URL and image URL directly
 
-## 1. Installation and Usage
+If your backend is private, generate a signed URL or append a temporary auth token before calling `setMetadata(...)`.
 
-
-### 1.1 Installation
-
-
-Go to the project directory and add the following dependencies in pubspec.yaml
-
-<!-- tabs:start -->
-
-#### pubspec.yaml
+## Installation
 
 ```yaml
 dependencies:
-  image_gallery_saver:
-    git:
-      url: https://gitcode.com/openharmony-sig/flutter_image_gallery_saver.git
+  huawei_cast: ^1.0.0
 ```
 
-Execute Command
+For local development:
+
+```yaml
+dependencies:
+  huawei_cast:
+    path: ../huawei_cast
+```
+
+Then run:
 
 ```bash
 flutter pub get
 ```
 
-<!-- tabs:end -->
+Import:
 
-### 1.2 Usage
+```dart
+import 'package:huawei_cast/huawei_cast.dart';
+```
 
-For use cases [ohos/example](./example)
+## Recommended call order
 
-## 2. Constraints
+1. Create `HuaweiCast()`.
+2. Subscribe to `statusStream` and `remoteControlStream`.
+3. Call `setMetadata(...)`.
+4. Call `startCast(assetId)`.
+5. Keep calling `setCurrentPosition(positionMs, isPlaying)` while playback changes.
+6. Use `stopCast()` when the user wants to disconnect.
 
-### 2.1 Compatibility
+Important: `startCast(...)` expects metadata to already exist. Call `setMetadata(...)` first.
 
-This document is verified based on the following versions:
+## API overview
 
-1. Flutter: 3.7.12-ohos-1.1.1; SDK: 5.0.0(12); IDE: DevEco Studio: 5.0.13.200; ROM: 5.1.0.120 SP3;
+### `setMetadata(contentUrl, mediaImage, title, durationMs)`
 
-## 3. API
+Creates or updates the underlying `AVSession`.
 
-> [!TIP] If the value of **ohos Support** is **yes**, it means that the ohos platform supports this property; **no** means the opposite; **partially** means some capabilities of this property are supported. The usage method is the same on different platforms and the effect is the same as that of iOS or Android.
+Use it to:
 
-| Name                | return          | Description                                                                                                             | Type     | ohos Support |
-|---------------------|-------------------------------------------------------------------------------------------------------------------------|----------|-------------------|-------------------|
-| saveImage(Uint8List imageBytes, {int quality = 80, String? name, bool isReturnImagePathOfIOS = false})                                 | FutureOr<dynamic> | save image to Gallery. | function | yes          |
-| saveFile(String file, {String? name, bool isReturnPathOfIOS = false}) | Future                                                  | Save the PNG，JPG，JPEG image or video located at [file] to the local device media gallery. | function | yes          |
+- set the media title shown in the system UI
+- set the cover image shown in the cast UI
+- provide the actual remote-playable URL
+- provide the total duration in milliseconds
 
-### Partners
-| Name                | return          | Description                                                                                                             | Type     | ohos Support |
-|---------------------|-------------------------------------------------------------------------------------------------------------------------|----------|-------------------|-------------------|
-| imageBytes                                 |  | The byte data of the image. | Uint8List | yes          |
-| quality                                 |  | The quality of image saving. | int | yes          |
-| name                                 |  | The file name when saving to the photo library. | String | yes          |
-| isReturnImagePathOfIOS                                 |  | Whether to return the image path on the iOS device. | bool | yes          |
-| file                                 |  | Specify the path or content of the target file to be saved. | String | yes          |
+### `setCurrentPosition(positionMs, isPlaying)`
 
-## 4. Properties
+Updates the system playback bar and playback state.
 
-> [!TIP] If the value of **ohos Support** is **yes**, it means that the ohos platform supports this property; **no** means the opposite; **partially** means some capabilities of this property are supported. The usage method is the same on different platforms and the effect is the same as that of iOS or Android.
+Call it from your player listener or a throttled timer. This is required if you want the phone-side playback controls to show the correct elapsed time and play / pause state.
 
-## 5. Known Issues
+### `startCast(assetId)`
 
-not
+Opens the system cast picker and starts playback after the user selects a receiver.
 
-## 6. Others
+If a cast controller already exists, the plugin tries to reuse it for the next media item.
 
-## 7. License
+### `statusStream`
 
-This project is licensed under  [MIT License](https://gitcode.com/openharmony-sig/flutter_image_gallery_saver/blob/master/LICENSE) .
+Connection state events.
 
-> Template version: v0.0.1
+- `CastSessionState.connected`
+- `CastSessionState.closed`
+
+When connected, `HuaweiCastStatus.receiverName` contains the receiver name.
+
+### `remoteControlStream`
+
+Remote commands coming from the system or receiver.
+
+- `play`
+- `pause`
+- `seekTo(positionMs)`
+
+Mirror these events back to your local player so your UI and playback position stay aligned.
+
+### `play()`, `pause()`, `seekTo(positionMs)`
+
+Sends playback commands to the connected receiver.
+
+Call them after the cast session becomes connected.
+
+### `stopCast()`
+
+Disconnects the active cast session and emits a disconnect event.
+
+Use this for a real disconnect action.
+
+### `clearSession()`
+
+Clears local session state only.
+
+Use this for cleanup when the page is disposed or when you want to drop prepared metadata without actively disconnecting a running cast session.
+
+If the user is already casting and taps "Disconnect", use `stopCast()` instead.
+
+## Syncing the playback bar
+
+There are two directions to handle:
+
+### Local player -> system playback panel
+
+1. Call `setMetadata(...)`.
+2. Continuously send `setCurrentPosition(positionMs, isPlaying)`.
+
+This keeps metadata, elapsed time, and play state visible and correct in the HarmonyOS media session UI.
+
+### System / remote receiver -> local player
+
+Listen to `remoteControlStream` and apply the action to your local player:
+
+- `play` -> local `play()`
+- `pause` -> local `pause()`
+- `seekTo` -> local `seekTo(...)`
+
+This keeps your in-app play button and slider in sync with remote interactions.
+
+## Example
+
+```dart
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:huawei_cast/huawei_cast.dart';
+import 'package:video_player/video_player.dart';
+
+class CastCoordinator {
+  CastCoordinator(this.controller) {
+    _statusSub = _cast.statusStream.listen(_onStatus);
+    _remoteSub = _cast.remoteControlStream.listen(_onRemoteControl);
+    controller.addListener(_syncPlaybackBar);
+  }
+
+  final HuaweiCast _cast = HuaweiCast();
+  final VideoPlayerController controller;
+
+  StreamSubscription<HuaweiCastStatus>? _statusSub;
+  StreamSubscription<HuaweiCastRemoteControlEvent>? _remoteSub;
+
+  Future<void> prepareMetadata({
+    required String contentUrl,
+    required String imageUrl,
+    required String title,
+    required Duration duration,
+  }) async {
+    await _cast.setMetadata(
+      contentUrl,
+      imageUrl,
+      title,
+      duration.inMilliseconds,
+    );
+  }
+
+  Future<void> startCasting(String assetId) async {
+    await _cast.startCast(assetId);
+  }
+
+  Future<void> _onRemoteControl(HuaweiCastRemoteControlEvent event) async {
+    switch (event.method) {
+      case 'play':
+        await controller.play();
+        break;
+      case 'pause':
+        await controller.pause();
+        break;
+      case 'seekTo':
+        await controller.seekTo(
+          Duration(milliseconds: event.position ?? 0),
+        );
+        break;
+    }
+  }
+
+  void _syncPlaybackBar() {
+    final value = controller.value;
+    if (!value.isInitialized) {
+      return;
+    }
+
+    unawaited(
+      _cast.setCurrentPosition(
+        value.position.inMilliseconds,
+        value.isPlaying,
+      ),
+    );
+  }
+
+  void _onStatus(HuaweiCastStatus status) {
+    if (status.state == CastSessionState.connected) {
+      debugPrint('Connected to: ${status.receiverName}');
+      return;
+    }
+
+    debugPrint('Cast disconnected');
+  }
+
+  Future<void> disconnect() => _cast.stopCast();
+
+  Future<void> dispose() async {
+    controller.removeListener(_syncPlaybackBar);
+    await _statusSub?.cancel();
+    await _remoteSub?.cancel();
+    await _cast.clearSession();
+  }
+}
+```
+
+## Switching media
+
+To cast another video in the same flow:
+
+1. call `setMetadata(...)` with the new media info
+2. call `startCast(newAssetId)`
+
+The plugin will try to reuse the active cast controller if possible.
+
+## Raw native callbacks
+
+You can inspect raw native method calls for debugging:
+
+```dart
+HuaweiCast.methodCalls.listen((call) {
+  debugPrint('native call: ${call.method} ${call.arguments}');
+});
+```
+
+Or install a custom handler:
+
+```dart
+HuaweiCast.setMethodCallHandler((call) async {
+  debugPrint('custom handler: ${call.method}');
+});
+```
