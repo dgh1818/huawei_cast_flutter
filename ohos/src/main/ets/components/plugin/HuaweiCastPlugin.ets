@@ -62,6 +62,7 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   private assetId?: string;
   private position: number = 0;
   private isPlaying: boolean = true
+  private outputDeviceListenerRegistered: boolean = false;
 
   constructor() {
   }
@@ -112,9 +113,27 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
         this.setCurrentPosition(this.position, this.isPlaying);
         result.success({});
         break;
+      case "play":
+        await this.play();
+        result.success({});
+        break;
+      case "pause":
+        await this.pause();
+        result.success({});
+        break;
+      case "seekTo":
+        this.position = call.args.get("position");
+        await this.seekTo(this.position);
+        result.success({});
+        break;
       case "clearSession":
         await this.clearSession();
         result.success({});
+        break;
+      case "stopCast":
+        await this.stopCast();
+        result.success({});
+        break;
       default:
         return result.notImplemented();
     }
@@ -125,6 +144,11 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
    * 设置输出设备变化监听器
    */
   private async setOutputDeviceChangeListener(assetId: string, title: string, mediaUri: string): Promise<void> {
+    if (!this.avSession || this.outputDeviceListenerRegistered) {
+      return;
+    }
+
+    this.outputDeviceListenerRegistered = true;
     this.avSession?.on('outputDeviceChange', async (connectState: avSession.ConnectionState,
       device: avSession.OutputDeviceInfo) => {
       const castCategory = device?.devices?.[0].castCategory;
@@ -134,6 +158,8 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
         this.avCastController = await this.avSession!.getAVCastController();
         await this.avCastController.prepare(this.playItem);
         await this.avCastController.start(this.playItem);
+        const receiverName = device?.devices?.[0]?.deviceName ?? '';
+        this.channel?.invokeMethod('castConnected', { 'receiverName': receiverName });
 
       }
 
@@ -144,6 +170,7 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
           await this.avSession?.stopCasting();
           this.avCastController = undefined;
         }
+        this.channel?.invokeMethod('castDisconnected', {});
       }
     })
   };
@@ -192,9 +219,26 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
     }
 
     if (this.avSession) {
+      await this.unregisterSessionListener();
+      this.avSession.off('outputDeviceChange');
+      this.outputDeviceListenerRegistered = false;
       this.avSession.destroy();
       this.avSession = undefined;
     }
+  }
+
+  async stopCast(): Promise<void> {
+    if (this.avCastController) {
+      await this.avCastController.release();
+      this.avCastController = undefined;
+    }
+
+    if (this.avSession) {
+      await this.avSession.stopCasting();
+    }
+
+    await this.clearSession();
+    this.channel?.invokeMethod('castDisconnected', {});
   }
 
 
@@ -215,6 +259,19 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
 
         }
       };
+
+      if (this.avCastController) {
+        try {
+          await this.avCastController.prepare(this.playItem);
+          await this.avCastController.start(this.playItem);
+          return;
+        } catch (err) {
+          console.error(`Failed to reuse existing cast controller: ${JSON.stringify(err)}`);
+          await this.avCastController.release();
+          this.avCastController = undefined;
+        }
+      }
+
       let avCastPicker = new avSession.AVCastPickerHelper(this.applicationContext);
 
       let tag = "createNewSession";
@@ -243,6 +300,10 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
   }
 
   private async setCurrentPosition(position: number, isplaying: boolean): Promise<void> {
+    if (!this.avSession) {
+      return;
+    }
+
     let playbackState: avSession.AVPlaybackState = {
       state: isplaying ? avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_PAUSE,
       position: {
@@ -251,13 +312,33 @@ export default class HuaweiCastPlugin implements FlutterPlugin, MethodCallHandle
       },
     };
 
-    this.avSession!.setAVPlaybackState(playbackState, (err) => {
+    this.avSession.setAVPlaybackState(playbackState, (err) => {
       if (err) {
         console.error(`Failed to set AVPlaybackState. Code: ${err.code}, message: ${err.message}`);
       } else {
         //console.info(`SetAVPlaybackState successfully`);
       }
     });
+  }
+
+  private async sendControlCommand(command: avSession.AVCastControlCommand): Promise<void> {
+    if (!this.avCastController) {
+      throw new Error('Cast controller is not ready');
+    }
+
+    await this.avCastController.sendControlCommand(command);
+  }
+
+  private async play(): Promise<void> {
+    await this.sendControlCommand({ command: 'play' });
+  }
+
+  private async pause(): Promise<void> {
+    await this.sendControlCommand({ command: 'pause' });
+  }
+
+  private async seekTo(position: number): Promise<void> {
+    await this.sendControlCommand({ command: 'seek', parameter: position });
   }
 
   async setListenerForMesFromController() {
